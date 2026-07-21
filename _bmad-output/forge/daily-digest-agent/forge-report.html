@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Forge Report · NewsAgent</title>
+<style>
+  :root{
+    --ink:#1c1a17; --paper:#f4efe6; --paper2:#ece4d6; --seal:#7b1d1d; --seal2:#a3322b;
+    --muted:#6b6357; --line:#d8cfbf; --gold:#8a6a2b;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:"Segoe UI",Helvetica,Arial,sans-serif;background:var(--paper);
+    color:var(--ink);line-height:1.55;-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:860px;margin:0 auto;padding:34px 26px 60px;}
+  header{text-align:center;border-bottom:2px double var(--line);padding-bottom:22px;margin-bottom:26px;}
+  .eyebrow{letter-spacing:.32em;font-size:.72rem;color:var(--muted);text-transform:uppercase;}
+  h1{margin:.3em 0 .1em;font-size:1.9rem;}
+  .sub{color:var(--muted);font-size:1.02rem;}
+  .seal-wrap{display:flex;justify-content:center;margin:18px 0 6px;}
+  section{margin:26px 0;padding:20px 22px;background:var(--paper2);border:1px solid var(--line);border-radius:10px;}
+  h2{margin:0 0 12px;font-size:1.12rem;letter-spacing:.02em;display:flex;align-items:center;gap:8px;}
+  h2 .n{color:var(--gold);}
+  ul{margin:.2em 0 .6em;padding:0;list-style:none;}
+  li{padding:7px 0 7px 22px;position:relative;border-bottom:1px dashed var(--line);}
+  li:last-child{border-bottom:0;}
+  li:before{content:"";position:absolute;left:2px;top:14px;width:9px;height:9px;border-radius:50%;
+    background:var(--seal2);box-shadow:0 0 0 2px var(--paper2);}
+  .reject li:before{background:var(--muted);}
+  .risk{background:#f6e9e7;border-color:#e3c9c5;}
+  .risk li:before{background:var(--seal);}
+  .verdict{text-align:center;margin:8px 0 2px;font-weight:700;letter-spacing:.14em;font-size:.9rem;color:var(--seal);}
+  .panel{margin-top:18px;border-top:1px solid var(--line);padding-top:16px;}
+  .panel h3{margin:0 0 10px;font-size:.92rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);}
+  .ppl{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .who{display:flex;gap:10px;align-items:flex-start;background:var(--paper);border:1px solid var(--line);
+    border-radius:8px;padding:10px 12px;}
+  .ic{font-size:1.25rem;line-height:1.2;}
+  .nm{font-weight:700;}
+  .rl{font-size:.78rem;color:var(--muted);}
+  .gen{font-size:.78rem;color:var(--gold);font-style:italic;}
+  footer{text-align:center;margin-top:30px;color:var(--muted);font-size:.82rem;}
+  @media(max-width:560px){.ppl{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Idea Forge · Report</div>
+    <h1>NewsAgent</h1>
+    <div class="sub">דיג'סט יומי בעברית — סוכן צד-שרת ששולף תוכן בשם המשתמש, מתמצת ומתרגם, ונשלח באימייל</div>
+    <div class="seal-wrap">
+      <svg width="150" height="150" viewBox="0 0 150 150" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <radialGradient id="wax" cx="40%" cy="35%" r="70%">
+            <stop offset="0%" stop-color="#c14a3f"/>
+            <stop offset="55%" stop-color="#9a2723"/>
+            <stop offset="100%" stop-color="#5e1414"/>
+          </radialGradient>
+          <filter id="rough" x="-10%" y="-10%" width="120%" height="120%">
+            <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="7" result="n"/>
+            <feDisplacementMap in="SourceGraphic" in2="n" scale="3.2"/>
+          </filter>
+        </defs>
+        <g filter="url(#rough)">
+          <path d="M75,10 C112,14 134,40 136,74 C138,108 112,138 74,140 C38,142 10,116 9,78 C8,42 38,8 75,10 Z"
+                fill="url(#wax)" stroke="#4a0f0f" stroke-width="1.5"/>
+          <path d="M75,22 C104,26 122,46 124,76 C126,104 104,126 75,128 C46,130 23,110 22,79 C21,48 46,20 75,22 Z"
+                fill="none" stroke="#e9c9a6" stroke-width="1" opacity="0.55"/>
+        </g>
+        <text x="75" y="74" text-anchor="middle" font-family="Georgia,serif" font-size="15"
+              font-weight="700" fill="#f3e3c0" letter-spacing="1">HARDENED</text>
+        <text x="75" y="92" text-anchor="middle" font-family="Georgia,serif" font-size="9"
+              fill="#e9c9a6" letter-spacing="2">· IDEA FORGE ·</text>
+        <text x="75" y="106" text-anchor="middle" font-family="Georgia,serif" font-size="8"
+              fill="#e9c9a6" opacity="0.8">2026-07-14</text>
+      </svg>
+    </div>
+    <div class="verdict">הרעיון עובה ומוכן לשימוש</div>
+  </header>
+
+  <section>
+    <h2><span class="n">◆</span> החלטות שננעצו</h2>
+    <ul>
+      <li><b>מקורות:</b> הכל; RSS מועדף (ניתן לסינון), חיפוש חופשי לא נפסל. מקורות באנגלית תקינים.</li>
+      <li><b>"בעברית" = שפת הפלט.</b> מקורות יכולים באנגלית; הסוכן מתרגם+מתמצת לעברית.</li>
+      <li><b>משתמש מטרה:</b> דובר-עברית, טכנולוגי-סקרן, לא קורא אנגלית, חסר זמן, מאחורי סינון אינטרנט, לא מכיר מקורות. נבדק על אוכלוסייה כמו משה ונעמי (dogfooding).</li>
+      <li><b>ארכיטקטורה:</b> צד-שרת באינטרנט הפתוח, שולף בשם המשתמש, מוסר רק את הדיג'סט העברי. צד-לקוח בלתי אפשרי עקב הסינון.</li>
+      <li><b>מודל מקורות:</b> המשתמש מגדיר תחומי עניין → הסוכן מגלה מקורות מתוכם. בנוסף רשימת ברירת מחדל שמרכיב האופרטור. המשתמש לא מאצר RSS בעצמו.</li>
+      <li><b>ערוץ הספקה:</b> אימייל יומי (MVP). וואטסאפ = שלב 2.</li>
+      <li><b>חלוקת עבודה —</b> נעמי (dev): מנוע תוכן (שליפה, גילוי מקורות, תמצות, תרגום, חלוקה, רינדור). משה (DevOps): שרת, סדרן, אימייל, רשימת מקורות, סודות, עלות LLM.</li>
+      <li><b>"פיצ'רים נוספים" — מחוץ ל-MVP.</b></li>
+    </ul>
+  </section>
+
+  <section class="reject">
+    <h2><span class="n">✕</span> נדחה (ולמה)</h2>
+    <ul>
+      <li><b>וואטסאפ כערוץ</b> — שלב 2 (Business API דורש אישורים/עלות).</li>
+      <li><b>אתר שמבקרים בו (pull)</b> — הסינון + חוסר הזמן של המשתמש הורסים אותו. נדחה ל-MVP.</li>
+      <li><b>"פיצ'רים נוספים"</b> — לא הוגדרו; נחנקו מחוץ ל-MVP כדי לא ליפול לכאן.</li>
+    </ul>
+  </section>
+
+  <section class="risk">
+    <h2><span class="n">!</span> סיכון פתוח ששרד בחינה</h2>
+    <ul>
+      <li><b>איכות גילוי המקורות מתחומי עניין:</b> איך הסוכן בוחר מקור איכותי (The Verge) ולא אקראי (בלוג). <b>לא נפתר בשלב הרעיון</b> — סיכון טכני שיש להתמודד איתו בבנייה.</li>
+    </ul>
+  </section>
+
+  <div class="panel">
+    <h3>מי לחץ את הרעיון</h3>
+    <div class="ppl">
+      <div class="who"><span class="ic">📋</span><div><div class="nm">John · PM</div><div class="rl">Job-to-be-Done, מיקוד ערך למשתמש</div></div></div>
+      <div class="who"><span class="ic">🏗️</span><div><div class="nm">Winston · Architect</div><div class="rl">היפוך הארכיטקטורה לצד-שרת</div></div></div>
+      <div class="who"><span class="ic">🎨</span><div><div class="nm">Sally · UX</div><div class="rl">ערוץ הספקה שחודר סינון</div></div></div>
+      <div class="who"><span class="ic">🚢</span><div><div class="nm">Dana · Pragmatist</div><div class="rl">חניקת "פיצ'רים נוספים" מחוץ ל-MVP</div></div></div>
+      <div class="who"><span class="ic">👤</span><div><div class="nm">דניאל</div><div class="gen">נוצר · קול המשתמש</div><div class="rl">מאחורי סינון, קורא רק עברית</div></div></div>
+      <div class="who"><span class="ic">👤</span><div><div class="nm">מהנדס צבירת-תוכן ספקן</div><div class="gen">נוצר</div><div class="rl">העלה את סיכון איכות גילוי המקורות</div></div></div>
+    </div>
+  </div>
+
+  <footer>
+    תיעוד מלא: <code>.memlog.md</code> · גביש: <code>forged-idea.md</code><br>
+    Idea Forge · סשן 2026-07-14
+  </footer>
+</div>
+</body>
+</html>

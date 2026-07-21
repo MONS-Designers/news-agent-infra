@@ -1,0 +1,9 @@
+.bmad-loop/runs/
+.bmad-loop/cache/
+.bmad-loop/policy.toml
+.claude/settings.local.json
+_bmad
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
