@@ -17,3 +17,7 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-default-rss-sources.md`
   summary: Before sources are used to redistribute translated summaries to end users (not just personal RSS reading), have a human check each outlet's syndication/ToS terms — flagged specifically for NYT, which is paywalled.
   evidence: Blind Hunter review raised this; it's a business/legal judgment call for whoever defines the admin's source-approval criteria, not something a data-validation script can or should decide. The admin-approval step this list feeds into (per news-agent's design) is the natural place to apply it.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-mvp-launch-deploy.md`
+  summary: Move production secrets from a scp'd `.env` file on the VM to Azure Key Vault + VM Managed Identity, with `provision-vm.sh` pulling secrets at deploy time instead of receiving a copied file.
+  evidence: User raised this during launch deploy; explicitly deferred to keep this MVP pass to the already-locked plan (scp + chmod 600 + service-user ownership). Worth doing once this is a real production system past the 2-dogfood-user stage — adds one Azure resource (Key Vault) and a Managed Identity, no app code changes needed since news-agent still just reads a local `.env`.

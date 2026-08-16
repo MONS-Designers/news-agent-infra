@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the NewsAgent weekly digest build + send
+
+[Timer]
+# REPLACE: day/time is a product decision, not an infra one — placeholder Mon 07:00,
+# after the 05:00 daily pipeline run has had time to finish.
+OnCalendar=Mon *-*-* 07:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

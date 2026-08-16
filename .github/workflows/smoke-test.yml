@@ -1,0 +1,23 @@
+name: Smoke test (live deploy)
+
+# Checks the live production deployment, not code in this repo — deliberately
+# separate from a normal push/PR-triggered CI job. Runs on a schedule so a
+# regression on the deployed site (not just in a diff) gets caught, and can
+# be triggered manually right after a deploy.
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run smoke test against live deployment
+        run: python deploy/smoke_test.py

@@ -1,0 +1,14 @@
+[Unit]
+Description=NewsAgent weekly digest build + send
+# Only the last two stages are weekly — one email per user per week — per
+# news-agent@dev README's "Schedule (decided 2026-08-07)".
+After=network-online.target newsagent-pipeline-daily.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/newsagent/news-agent
+EnvironmentFile=/opt/newsagent/news-agent/.env
+ExecStart=/opt/newsagent/news-agent/.venv/bin/python -m newsagent.cli build-digests
+ExecStart=/opt/newsagent/news-agent/.venv/bin/python -m newsagent.cli send-digests
+User=newsagent

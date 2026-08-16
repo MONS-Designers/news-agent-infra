@@ -1,0 +1,17 @@
+[Unit]
+Description=NewsAgent daily pipeline (fetch, filter, summarize)
+# Collection stages run daily so nothing rolls off an RSS feed unseen between
+# weekly sends — per news-agent@dev README's "Schedule (decided 2026-08-07)".
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# REPLACE: path where news-agent is checked out (dev branch) on the server.
+WorkingDirectory=/opt/newsagent/news-agent
+EnvironmentFile=/opt/newsagent/news-agent/.env
+ExecStart=/opt/newsagent/news-agent/.venv/bin/python -m newsagent.cli fetch
+ExecStart=/opt/newsagent/news-agent/.venv/bin/python -m newsagent.cli filter
+ExecStart=/opt/newsagent/news-agent/.venv/bin/python -m newsagent.cli summarize
+# REPLACE: run as a non-root service user once one exists on the box.
+User=newsagent
