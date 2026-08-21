@@ -1,0 +1,13 @@
+# Local state (explicit user choice, no remote backend in this slice).
+terraform.tfstate
+terraform.tfstate.*
+*.tfvars
+*.tfvars.json
+
+# Provider plugin cache.
+.terraform/
+
+# Plan output files, if ever saved locally.
+*.tfplan
+
+# .terraform.lock.hcl is intentionally NOT ignored — commit it for reproducible provider versions.
