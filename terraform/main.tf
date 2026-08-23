@@ -211,6 +211,12 @@ resource "azurerm_linux_web_app" "api_stage" {
   service_plan_id     = azurerm_service_plan.stage.id
 
   site_config {
+    # Required to pull from newsagentacr once a real (non-placeholder) image
+    # tag is set -- the registry's admin user is deliberately disabled, so
+    # there's no username/password to fall back on; this app's own identity
+    # (below) is the only auth path, via the AcrPull role assignment below.
+    container_registry_use_managed_identity = true
+
     application_stack {
       docker_image_name   = trimprefix(var.placeholder_image, "${trimprefix(var.placeholder_registry_url, "https://")}/")
       docker_registry_url = var.placeholder_registry_url
@@ -253,10 +259,17 @@ resource "azurerm_role_assignment" "api_stage_kv_access" {
   principal_id         = azurerm_linux_web_app.api_stage.identity[0].principal_id
 }
 
+resource "azurerm_role_assignment" "api_stage_acr_pull" {
+  scope                = azurerm_container_registry.shared.id
+  role_definition_name = "AcrPull"
+  principal_id         = azurerm_linux_web_app.api_stage.identity[0].principal_id
+}
+
 # Frontend. WEBSITES_PORT=8080 matches the real image (nginx-unprivileged,
 # see deploy/for-naomi/Dockerfile.frontend) -- the placeholder may not answer
 # on 8080 until the real image is set, which is expected for this slice. No
-# identity, no Key Vault access -- static SPA, nothing to fetch.
+# Key Vault access -- static SPA, nothing to fetch there -- but it does need
+# an identity to pull its own image from the (admin-disabled) ACR.
 resource "azurerm_linux_web_app" "frontend_stage" {
   name                = "newsagent-frontend-stage"
   resource_group_name = azurerm_resource_group.stage.name
@@ -264,10 +277,16 @@ resource "azurerm_linux_web_app" "frontend_stage" {
   service_plan_id     = azurerm_service_plan.stage.id
 
   site_config {
+    container_registry_use_managed_identity = true
+
     application_stack {
       docker_image_name   = trimprefix(var.placeholder_image, "${trimprefix(var.placeholder_registry_url, "https://")}/")
       docker_registry_url = var.placeholder_registry_url
     }
+  }
+
+  identity {
+    type = "SystemAssigned"
   }
 
   app_settings = {
@@ -283,6 +302,12 @@ resource "azurerm_linux_web_app" "frontend_stage" {
     # here, not baked into the image.
     BACKEND_HOST = "newsagent-api-stage.azurewebsites.net"
   }
+}
+
+resource "azurerm_role_assignment" "frontend_stage_acr_pull" {
+  scope                = azurerm_container_registry.shared.id
+  role_definition_name = "AcrPull"
+  principal_id         = azurerm_linux_web_app.frontend_stage.identity[0].principal_id
 }
 
 # --- Prod environment: exact mirror of stage (user's explicit instruction,
@@ -312,6 +337,10 @@ resource "azurerm_linux_web_app" "api_prod" {
   service_plan_id     = azurerm_service_plan.prod.id
 
   site_config {
+    # See the matching comment on api_stage -- same admin-disabled-ACR
+    # reasoning.
+    container_registry_use_managed_identity = true
+
     application_stack {
       docker_image_name   = trimprefix(var.placeholder_image, "${trimprefix(var.placeholder_registry_url, "https://")}/")
       docker_registry_url = var.placeholder_registry_url
@@ -351,6 +380,12 @@ resource "azurerm_role_assignment" "api_prod_kv_access" {
   principal_id         = azurerm_linux_web_app.api_prod.identity[0].principal_id
 }
 
+resource "azurerm_role_assignment" "api_prod_acr_pull" {
+  scope                = azurerm_container_registry.shared.id
+  role_definition_name = "AcrPull"
+  principal_id         = azurerm_linux_web_app.api_prod.identity[0].principal_id
+}
+
 resource "azurerm_linux_web_app" "frontend_prod" {
   name                = "newsagent-frontend-prod"
   resource_group_name = azurerm_resource_group.prod.name
@@ -358,10 +393,16 @@ resource "azurerm_linux_web_app" "frontend_prod" {
   service_plan_id     = azurerm_service_plan.prod.id
 
   site_config {
+    container_registry_use_managed_identity = true
+
     application_stack {
       docker_image_name   = trimprefix(var.placeholder_image, "${trimprefix(var.placeholder_registry_url, "https://")}/")
       docker_registry_url = var.placeholder_registry_url
     }
+  }
+
+  identity {
+    type = "SystemAssigned"
   }
 
   app_settings = {
@@ -371,6 +412,12 @@ resource "azurerm_linux_web_app" "frontend_prod" {
     # reasoning, prod's own backend hostname.
     BACKEND_HOST = "newsagent-api-prod.azurewebsites.net"
   }
+}
+
+resource "azurerm_role_assignment" "frontend_prod_acr_pull" {
+  scope                = azurerm_container_registry.shared.id
+  role_definition_name = "AcrPull"
+  principal_id         = azurerm_linux_web_app.frontend_prod.identity[0].principal_id
 }
 
 output "shared_resource_group_name" {
