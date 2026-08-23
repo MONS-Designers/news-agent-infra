@@ -155,12 +155,18 @@ resource "azurerm_user_assigned_identity" "ci_acr_push" {
   location            = azurerm_resource_group.shared.location
 }
 
+# GitHub's OIDC subject now includes immutable owner/repo IDs, not just names
+# (rolled out 2026-04-23, https://github.blog/changelog/2026-04-23-immutable-subject-claims-for-github-actions-oidc-tokens/
+# -- MONS-Designers/news-agent is enrolled). A name-only subject here fails
+# OIDC exchange with AADSTS700213 "No matching federated identity record
+# found", even though client-id/tenant-id/subscription-id are all correct --
+# confirmed by hitting that exact error against the previous subject format.
 resource "azurerm_federated_identity_credential" "ci_acr_push_github" {
   name      = "news-agent-dev-push"
   parent_id = azurerm_user_assigned_identity.ci_acr_push.id
   audience  = ["api://AzureADTokenExchange"]
   issuer    = "https://token.actions.githubusercontent.com"
-  subject   = "repo:${var.github_repo}:ref:refs/heads/${var.github_branch}"
+  subject   = "repo:${var.github_org}@${var.github_org_id}/${var.github_repo_name}@${var.github_repo_id}:ref:refs/heads/${var.github_branch}"
 }
 
 resource "azurerm_role_assignment" "ci_acr_push" {

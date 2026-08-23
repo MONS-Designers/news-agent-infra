@@ -40,10 +40,28 @@ variable "key_vault_name" {
   default     = "newsagent-kv"
 }
 
-variable "github_repo" {
-  description = "GitHub org/repo whose Actions workflow is trusted for OIDC push to ACR (Naomi's app repo)"
+variable "github_org" {
+  description = "GitHub org whose Actions workflow is trusted for OIDC push to ACR"
   type        = string
-  default     = "MONS-Designers/news-agent"
+  default     = "MONS-Designers"
+}
+
+variable "github_org_id" {
+  description = "GitHub's numeric ID for github_org -- required in the federated identity subject since MONS-Designers/news-agent is enrolled in immutable OIDC subject claims. Look up via: gh api orgs/<org> --jq .id"
+  type        = string
+  default     = "174935491"
+}
+
+variable "github_repo_name" {
+  description = "Repo name (without org prefix) whose Actions workflow is trusted for OIDC push to ACR (Naomi's app repo)"
+  type        = string
+  default     = "news-agent"
+}
+
+variable "github_repo_id" {
+  description = "GitHub's numeric ID for github_repo_name -- same immutable-subject-claim requirement as github_org_id. Look up via: gh api repos/<org>/<repo> --jq .id"
+  type        = string
+  default     = "1302724286"
 }
 
 variable "github_branch" {
