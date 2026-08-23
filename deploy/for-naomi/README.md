@@ -11,8 +11,14 @@ been applied. Nothing in `news-agent-infra`'s automation touches
 |---|---|
 | `Dockerfile.backend` | repo root |
 | `Dockerfile.frontend` | repo root |
-| `nginx.frontend.conf` | repo root (same dir as `Dockerfile.frontend` — it's `COPY`'d in by path) |
+| `nginx.frontend.conf.template` | repo root (same dir as `Dockerfile.frontend` — it's `COPY`'d in by path) |
 | `docker-build-push.yml` | `.github/workflows/docker-build-push.yml` |
+
+No `VITE_API_BASE` build arg for the frontend anymore — the image builds the
+same way for every environment. Which backend it talks to is set at
+container start via a `BACKEND_HOST` app setting (already wired in
+Terraform for both `newsagent-frontend-stage` and `newsagent-frontend-prod`
+— nothing to do here). See PR #58 for why.
 
 ## One-time setup before the workflow can run
 
@@ -86,13 +92,17 @@ Then hit each app's default hostname (from the Terraform outputs
 `api_stage_default_hostname` / `frontend_stage_default_hostname`) to confirm
 the real app is running, not the placeholder.
 
+Same commands work for prod — swap `stage` for `prod` in every name and
+resource group (`newsagent-api-prod`, `newsagent-frontend-prod`,
+`newsagent-prod-rg`). The same image tag can be pointed at both; that's the
+whole reason the frontend image no longer bakes in a backend URL.
+
 ## Not included here (deferred, see `deferred-work.md`)
 
 - Anything that automatically applies a new image tag — that's the Azure
   Function slice, not built yet. This handoff only gets you to "the real app
-  runs in Azure, verified once by hand."
-- A production environment or cutover from the existing VM (though the ACR and
-  Key Vault built here are already shared-ready for when it lands).
-- Per-environment Key Vault access isolation — the stage app's identity has
-  vault-level `Key Vault Secrets User` today, which will need tightening once
-  real prod secrets share this same vault (logged in `deferred-work.md`).
+  runs in Azure, verified once by hand," for stage and prod alike.
+- Per-environment Key Vault access isolation — each app's identity has
+  vault-level `Key Vault Secrets User` today (both stage and prod share one
+  vault), which will need tightening now that real secrets for both live
+  there (logged in `deferred-work.md`).

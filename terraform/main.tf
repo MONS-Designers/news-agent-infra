@@ -266,6 +266,16 @@ resource "azurerm_linux_web_app" "frontend_stage" {
 
   app_settings = {
     WEBSITES_PORT = "8080"
+
+    # Literal, not a reference to azurerm_linux_web_app.api_stage -- that
+    # would create a cycle (api_stage's app_settings already reference this
+    # resource for NEWSAGENT_FRONTEND_URL). Same predictable
+    # <name>.azurewebsites.net pattern used there. nginx's envsubst template
+    # (deploy/for-naomi/nginx.frontend.conf.template) reads this at
+    # container start to reverse-proxy /api/* to the backend -- the same
+    # image is promotable stage -> prod because this is set per-environment
+    # here, not baked into the image.
+    BACKEND_HOST = "newsagent-api-stage.azurewebsites.net"
   }
 }
 
@@ -350,6 +360,10 @@ resource "azurerm_linux_web_app" "frontend_prod" {
 
   app_settings = {
     WEBSITES_PORT = "8080"
+
+    # See the matching comment on frontend_stage -- same cycle-avoidance
+    # reasoning, prod's own backend hostname.
+    BACKEND_HOST = "newsagent-api-prod.azurewebsites.net"
   }
 }
 
