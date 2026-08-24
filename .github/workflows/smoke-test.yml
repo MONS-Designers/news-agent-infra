@@ -6,7 +6,7 @@ name: Smoke test (live deploy)
 # be triggered manually right after a deploy.
 on:
   schedule:
-    - cron: "17 */6 * * *"
+    - cron: ""
   workflow_dispatch:
 
 jobs:
