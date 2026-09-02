@@ -258,6 +258,21 @@ resource "azurerm_linux_web_app" "api_stage" {
     }
   }
 
+  # Pre-existing live config, not captured here before -- codified rather than
+  # letting `terraform apply` silently drop it. HTTP access logs (3 days /
+  # 100MB) are the useful part; the two detail toggles are already off.
+  logs {
+    detailed_error_messages = false
+    failed_request_tracing  = false
+
+    http_logs {
+      file_system {
+        retention_in_days = 3
+        retention_in_mb   = 100
+      }
+    }
+  }
+
   identity {
     type = "SystemAssigned"
   }
@@ -265,6 +280,11 @@ resource "azurerm_linux_web_app" "api_stage" {
   app_settings = {
     WEBSITES_PORT    = "8000"
     DOCKER_ENABLE_CI = "true"
+
+    # Stateless container -- nothing written to /home needs to survive a
+    # restart. Pre-existing live config, codified here rather than left as
+    # drift for `terraform apply` to silently reset.
+    WEBSITES_ENABLE_APP_SERVICE_STORAGE = "false"
 
     NEWSAGENT_DATABASE_URL         = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault_secret.api_stage_database_url.versionless_id})"
     NEWSAGENT_SMTP_PASSWORD        = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault_secret.api_stage_smtp_password.versionless_id})"
@@ -329,6 +349,11 @@ resource "azurerm_linux_web_app" "frontend_stage" {
   app_settings = {
     WEBSITES_PORT    = "8080"
     DOCKER_ENABLE_CI = "true"
+
+    # Stateless static-file server -- nothing written to /home needs to
+    # survive a restart. Pre-existing live config, codified here rather than
+    # left as drift for `terraform apply` to silently reset.
+    WEBSITES_ENABLE_APP_SERVICE_STORAGE = "false"
 
     # Literal, not a reference to azurerm_linux_web_app.api_stage -- that
     # would create a cycle (api_stage's app_settings already reference this
