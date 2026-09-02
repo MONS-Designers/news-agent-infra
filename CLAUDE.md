@@ -44,18 +44,6 @@ the broken path instead of an error. Full writeup:
 Naomi's side of the contract, a two-line message to her before locking it in is cheaper than
 discovering the gap after a deploy.
 
-## Deploy verification (definition of done)
-
-A deploy is not "done" when systemd services show `active` and `/health` returns 200 — those
-prove the process is alive, not that dependent flows (login, admin actions, digest send) work.
-Before reporting a deploy complete:
-- Run `python deploy/smoke_test.py` against the live URLs. It also runs on a schedule
-  (`.github/workflows/smoke-test.yml`) as a standing regression check, but run it manually
-  right after any deploy — don't wait for the next scheduled run.
-- For any flow the smoke test can't check headlessly (anything needing real OAuth completion),
-  exercise it once for real — a real click — rather than assuming a passing automated check
-  covers it.
-
 ## Background
 
 - A source scoring/quality mechanism (good vs. not) is planned for `sources/` but not yet

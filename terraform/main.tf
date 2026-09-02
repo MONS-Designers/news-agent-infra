@@ -3,8 +3,9 @@
 # Azure, now with real secrets via a shared Key Vault (renegotiated
 # 2026-08-21 -- was deferred, see Spec Change Log in
 # ../_bmad-output/implementation-artifacts/spec-stage-deploy-baseline.md).
-# No Function, no tag file, no prod environment yet -- deferred (see
-# ../_bmad-output/implementation-artifacts/deferred-work.md).
+# The automatic deploy trigger (also deferred here originally) is now live:
+# DOCKER_ENABLE_CI + a moving ACR tag per environment, no Azure Function, no
+# tag file -- see ../_bmad-output/specs/spec-gitops-deploy-trigger/.
 #
 # ACR and Key Vault live in newsagent-shared-rg -- reused by stage AND the
 # not-yet-built prod slice, per the user's explicit design (2026-08-21).
@@ -144,11 +145,15 @@ resource "azurerm_key_vault_secret" "api_prod_session_secret" {
   depends_on   = [time_sleep.wait_for_deployer_kv_rbac]
 }
 
-# Credential A: news-agent's GitHub Actions authenticates as this identity via
-# OIDC (no stored Azure secret) to push images to the shared ACR. Scoped to
-# AcrPush only. Lives in the shared RG since it's not stage-specific -- one
-# CI workflow, one push target, regardless of how many environments consume
-# images from it.
+# Credential A: news-agent-infra's own deploy.yml/rollback.yml GitHub Actions
+# authenticate as this identity via OIDC (no stored Azure secret) to push
+# images to the shared ACR and to retag them on rollback (az acr import --
+# same AcrPush role covers both, see pipeline-design.md's Credentials
+# section). Scoped to AcrPush only. Lives in the shared RG since it's not
+# stage-specific -- one identity, one push target, regardless of how many
+# environments consume images from it. Originally used by news-agent's own
+# CI; re-pointed to this repo's main branch by spec-gitops-deploy-trigger
+# once the pipeline moved here (see the federated-identity comment below).
 resource "azurerm_user_assigned_identity" "ci_acr_push" {
   name                = "newsagent-ci-acr-push"
   resource_group_name = azurerm_resource_group.shared.name
@@ -157,10 +162,19 @@ resource "azurerm_user_assigned_identity" "ci_acr_push" {
 
 # GitHub's OIDC subject now includes immutable owner/repo IDs, not just names
 # (rolled out 2026-04-23, https://github.blog/changelog/2026-04-23-immutable-subject-claims-for-github-actions-oidc-tokens/
-# -- MONS-Designers/news-agent is enrolled). A name-only subject here fails
-# OIDC exchange with AADSTS700213 "No matching federated identity record
-# found", even though client-id/tenant-id/subscription-id are all correct --
-# confirmed by hitting that exact error against the previous subject format.
+# -- both news-agent and news-agent-infra are enrolled). A name-only subject
+# here fails OIDC exchange with AADSTS700213 "No matching federated identity
+# record found", even though client-id/tenant-id/subscription-id are all
+# correct -- confirmed by hitting that exact error against the previous
+# subject format.
+#
+# Re-pointed (spec-gitops-deploy-trigger) from news-agent's refs/heads/dev to
+# news-agent-infra's own refs/heads/main -- the build/push/deploy pipeline
+# (deploy.yml, rollback.yml) now runs here, not in news-agent, so this is the
+# ref whose OIDC token actually needs to authenticate. `name` stays
+# "news-agent-dev-push" (now a misnomer) rather than being renamed: renaming
+# it forces Terraform to destroy+recreate the credential instead of updating
+# it in place, for no functional benefit.
 resource "azurerm_federated_identity_credential" "ci_acr_push_github" {
   name      = "news-agent-dev-push"
   parent_id = azurerm_user_assigned_identity.ci_acr_push.id
@@ -172,6 +186,15 @@ resource "azurerm_federated_identity_credential" "ci_acr_push_github" {
 resource "azurerm_role_assignment" "ci_acr_push" {
   scope                = azurerm_container_registry.shared.id
   role_definition_name = "AcrPush"
+  principal_id         = azurerm_user_assigned_identity.ci_acr_push.principal_id
+}
+
+# CAP-3 rollback (az acr import) is a management-plane operation -- AcrPush above only grants
+# the data-plane pull/push actions and does NOT include importImage. Microsoft's own docs for
+# same-registry import require this exact built-in role on the target registry.
+resource "azurerm_role_assignment" "ci_acr_import" {
+  scope                = azurerm_container_registry.shared.id
+  role_definition_name = "Container Registry Data Importer and Data Reader"
   principal_id         = azurerm_user_assigned_identity.ci_acr_push.principal_id
 }
 
@@ -191,9 +214,21 @@ resource "azurerm_service_plan" "stage" {
   sku_name            = "B1"
 }
 
-# Backend. Starts on a public placeholder image -- no real image exists in
-# ACR yet. WEBSITES_PORT is required once the real image ships: the backend
-# Dockerfile binds uvicorn to 8000, not App Service's default of 80.
+# Backend. Tracks the moving `stage-latest` tag in newsagentacr (previously
+# a public placeholder image before spec-gitops-deploy-trigger -- no deploy
+# pipeline populated a real image until then). WEBSITES_PORT is required:
+# the backend Dockerfile binds uvicorn to 8000, not App Service's default of
+# 80.
+#
+# DOCKER_ENABLE_CI=true (app_settings below) is what makes this auto-deploy:
+# Azure auto-creates and owns an ACR webhook that fires whenever
+# newsagent-api:stage-latest is repushed, pulling + restarting this app --
+# no azurerm_container_registry_webhook resource, no explicit
+# `az webapp config container set` step anywhere in the pipeline (see
+# pipeline-design.md's Credentials section). Bootstrap ordering matters: the
+# stage-latest tag must exist in ACR (i.e. deploy.yml must have run at least
+# once) before this config is applied, or the app has nothing to pull --
+# see deploy/for-naomi/README.md's manual-steps section.
 #
 # System-assigned identity + Key Vault references in app_settings: Azure
 # resolves the @Microsoft.KeyVault(...) strings at runtime using this
@@ -211,15 +246,15 @@ resource "azurerm_linux_web_app" "api_stage" {
   service_plan_id     = azurerm_service_plan.stage.id
 
   site_config {
-    # Required to pull from newsagentacr once a real (non-placeholder) image
-    # tag is set -- the registry's admin user is deliberately disabled, so
-    # there's no username/password to fall back on; this app's own identity
-    # (below) is the only auth path, via the AcrPull role assignment below.
+    # Required to pull from newsagentacr -- the registry's admin user is
+    # deliberately disabled, so there's no username/password to fall back
+    # on; this app's own identity (below) is the only auth path, via the
+    # AcrPull role assignment below.
     container_registry_use_managed_identity = true
 
     application_stack {
-      docker_image_name   = trimprefix(var.placeholder_image, "${trimprefix(var.placeholder_registry_url, "https://")}/")
-      docker_registry_url = var.placeholder_registry_url
+      docker_image_name   = "newsagent-api:stage-latest"
+      docker_registry_url = "https://${azurerm_container_registry.shared.login_server}"
     }
   }
 
@@ -228,7 +263,8 @@ resource "azurerm_linux_web_app" "api_stage" {
   }
 
   app_settings = {
-    WEBSITES_PORT = "8000"
+    WEBSITES_PORT    = "8000"
+    DOCKER_ENABLE_CI = "true"
 
     NEWSAGENT_DATABASE_URL         = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault_secret.api_stage_database_url.versionless_id})"
     NEWSAGENT_SMTP_PASSWORD        = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault_secret.api_stage_smtp_password.versionless_id})"
@@ -265,11 +301,12 @@ resource "azurerm_role_assignment" "api_stage_acr_pull" {
   principal_id         = azurerm_linux_web_app.api_stage.identity[0].principal_id
 }
 
-# Frontend. WEBSITES_PORT=8080 matches the real image (nginx-unprivileged,
-# see deploy/for-naomi/Dockerfile.frontend) -- the placeholder may not answer
-# on 8080 until the real image is set, which is expected for this slice. No
-# Key Vault access -- static SPA, nothing to fetch there -- but it does need
-# an identity to pull its own image from the (admin-disabled) ACR.
+# Frontend. Tracks the moving `stage-latest` tag in newsagentacr, same
+# DOCKER_ENABLE_CI auto-deploy mechanism as api_stage above. WEBSITES_PORT=
+# 8080 matches the real image (nginx-unprivileged, see
+# deploy/for-naomi/Dockerfile.frontend). No Key Vault access -- static SPA,
+# nothing to fetch there -- but it does need an identity to pull its own
+# image from the (admin-disabled) ACR.
 resource "azurerm_linux_web_app" "frontend_stage" {
   name                = "newsagent-frontend-stage"
   resource_group_name = azurerm_resource_group.stage.name
@@ -280,8 +317,8 @@ resource "azurerm_linux_web_app" "frontend_stage" {
     container_registry_use_managed_identity = true
 
     application_stack {
-      docker_image_name   = trimprefix(var.placeholder_image, "${trimprefix(var.placeholder_registry_url, "https://")}/")
-      docker_registry_url = var.placeholder_registry_url
+      docker_image_name   = "newsagent-frontend:stage-latest"
+      docker_registry_url = "https://${azurerm_container_registry.shared.login_server}"
     }
   }
 
@@ -290,7 +327,8 @@ resource "azurerm_linux_web_app" "frontend_stage" {
   }
 
   app_settings = {
-    WEBSITES_PORT = "8080"
+    WEBSITES_PORT    = "8080"
+    DOCKER_ENABLE_CI = "true"
 
     # Literal, not a reference to azurerm_linux_web_app.api_stage -- that
     # would create a cycle (api_stage's app_settings already reference this
@@ -312,10 +350,9 @@ resource "azurerm_role_assignment" "frontend_stage_acr_pull" {
 
 # --- Prod environment: exact mirror of stage (user's explicit instruction,
 # 2026-08-21) -- same shape, same shared ACR/Key Vault, own resource group,
-# own App Service Plan, own secrets. Still on the placeholder image (no prod
-# image pipeline/promotion exists yet -- CI only builds on push to `dev`,
-# same as stage) and still no Function/tag-file deploy automation -- both
-# remain deferred, see deferred-work.md. ---
+# own App Service Plan, own secrets. Tracks the moving `latest` tag, fed by
+# news-agent's own `main` branch (spec-gitops-deploy-trigger) -- fully
+# decoupled from stage/`dev`, same DOCKER_ENABLE_CI auto-deploy mechanism. ---
 
 resource "azurerm_resource_group" "prod" {
   name     = var.resource_group_name_prod
@@ -342,8 +379,8 @@ resource "azurerm_linux_web_app" "api_prod" {
     container_registry_use_managed_identity = true
 
     application_stack {
-      docker_image_name   = trimprefix(var.placeholder_image, "${trimprefix(var.placeholder_registry_url, "https://")}/")
-      docker_registry_url = var.placeholder_registry_url
+      docker_image_name   = "newsagent-api:latest"
+      docker_registry_url = "https://${azurerm_container_registry.shared.login_server}"
     }
   }
 
@@ -352,7 +389,8 @@ resource "azurerm_linux_web_app" "api_prod" {
   }
 
   app_settings = {
-    WEBSITES_PORT = "8000"
+    WEBSITES_PORT    = "8000"
+    DOCKER_ENABLE_CI = "true"
 
     NEWSAGENT_DATABASE_URL         = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault_secret.api_prod_database_url.versionless_id})"
     NEWSAGENT_SMTP_PASSWORD        = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault_secret.api_prod_smtp_password.versionless_id})"
@@ -396,8 +434,8 @@ resource "azurerm_linux_web_app" "frontend_prod" {
     container_registry_use_managed_identity = true
 
     application_stack {
-      docker_image_name   = trimprefix(var.placeholder_image, "${trimprefix(var.placeholder_registry_url, "https://")}/")
-      docker_registry_url = var.placeholder_registry_url
+      docker_image_name   = "newsagent-frontend:latest"
+      docker_registry_url = "https://${azurerm_container_registry.shared.login_server}"
     }
   }
 
@@ -406,7 +444,8 @@ resource "azurerm_linux_web_app" "frontend_prod" {
   }
 
   app_settings = {
-    WEBSITES_PORT = "8080"
+    WEBSITES_PORT    = "8080"
+    DOCKER_ENABLE_CI = "true"
 
     # See the matching comment on frontend_stage -- same cycle-avoidance
     # reasoning, prod's own backend hostname.
@@ -437,17 +476,17 @@ output "key_vault_name" {
 }
 
 output "ci_identity_client_id" {
-  description = "AZURE_CLIENT_ID for news-agent's OIDC login step"
+  description = "AZURE_CLIENT_ID for news-agent-infra's deploy.yml/rollback.yml OIDC login step (spec-gitops-deploy-trigger moved this here from news-agent)"
   value       = azurerm_user_assigned_identity.ci_acr_push.client_id
 }
 
 output "tenant_id" {
-  description = "AZURE_TENANT_ID for news-agent's OIDC login step"
+  description = "AZURE_TENANT_ID for news-agent-infra's deploy.yml/rollback.yml OIDC login step"
   value       = azurerm_user_assigned_identity.ci_acr_push.tenant_id
 }
 
 output "subscription_id" {
-  description = "AZURE_SUBSCRIPTION_ID for news-agent's OIDC login step"
+  description = "AZURE_SUBSCRIPTION_ID for news-agent-infra's deploy.yml/rollback.yml OIDC login step"
   value       = var.subscription_id
 }
 

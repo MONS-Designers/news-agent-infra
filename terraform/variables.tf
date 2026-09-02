@@ -47,39 +47,27 @@ variable "github_org" {
 }
 
 variable "github_org_id" {
-  description = "GitHub's numeric ID for github_org -- required in the federated identity subject since MONS-Designers/news-agent is enrolled in immutable OIDC subject claims. Look up via: gh api orgs/<org> --jq .id"
+  description = "GitHub's numeric ID for github_org -- required in the federated identity subject since MONS-Designers is enrolled in immutable OIDC subject claims. Look up via: gh api orgs/<org> --jq .id"
   type        = string
   default     = "174935491"
 }
 
 variable "github_repo_name" {
-  description = "Repo name (without org prefix) whose Actions workflow is trusted for OIDC push to ACR (Naomi's app repo)"
+  description = "Repo name (without org prefix) whose Actions workflow is trusted for OIDC push to ACR -- news-agent-infra itself: the build/push/deploy pipeline (deploy.yml) runs here now, not in news-agent (spec-gitops-deploy-trigger)."
   type        = string
-  default     = "news-agent"
+  default     = "news-agent-infra"
 }
 
 variable "github_repo_id" {
   description = "GitHub's numeric ID for github_repo_name -- same immutable-subject-claim requirement as github_org_id. Look up via: gh api repos/<org>/<repo> --jq .id"
   type        = string
-  default     = "1302724286"
+  default     = "1302889366"
 }
 
 variable "github_branch" {
-  description = "Branch whose push-triggered workflow is trusted for OIDC"
+  description = "Branch whose push-triggered workflow is trusted for OIDC -- news-agent-infra's own main (deploy.yml and rollback.yml both live there), not news-agent's dev."
   type        = string
-  default     = "dev"
-}
-
-variable "placeholder_image" {
-  description = "Public placeholder image both stage App Services start on until real images exist in ACR"
-  type        = string
-  default     = "mcr.microsoft.com/appsvc/staticsite:latest"
-}
-
-variable "placeholder_registry_url" {
-  description = "Registry URL for the placeholder image"
-  type        = string
-  default     = "https://mcr.microsoft.com"
+  default     = "main"
 }
 
 # --- Key Vault secret values ---

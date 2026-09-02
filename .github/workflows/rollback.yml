@@ -1,0 +1,129 @@
+# Deliberate, manually-triggered rollback for either environment. Server-side
+# ACR retag (az acr import) -- no rebuild, reuses an already-pushed image,
+# faster and more faithful than rebuilding via git revert (that path stays
+# available separately: revert + push just goes through the normal deploy.yml
+# flow like any other commit). See CAP-3 in
+# _bmad-output/specs/spec-gitops-deploy-trigger/SPEC.md.
+#
+# Retagging the moving tag re-triggers the same DOCKER_ENABLE_CI webhook /
+# pull / restart path as a normal deploy, so verification below is identical
+# to deploy.yml's.
+#
+# service=both runs the api and frontend chains sequentially, each gated
+# (implicitly, via GitHub Actions' default success() on every `if:`) on the
+# whole job's status so far -- a failure anywhere in the api chain skips the
+# frontend chain entirely (shown as "skipped" in the run summary, not
+# silently). That's a deliberate fail-fast default for an operator-run
+# rollback, not a bug: re-run with a single `service` value to retry just
+# the one that didn't get attempted.
+name: rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Which service to roll back"
+        required: true
+        type: choice
+        options: [api, frontend, both]
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options: [stage, prod]
+      sha:
+        description: "Commit SHA to roll back to (leave empty for one step back)"
+        required: false
+        type: string
+
+permissions:
+  id-token: write # required for OIDC federated login
+  contents: read
+
+# Shares deploy.yml's concurrency group -- a rollback and an in-flight deploy
+# to the same environment must not race on the same moving tag.
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+env:
+  ACR_LOGIN_SERVER: newsagentacr.azurecr.io
+  ACR_NAME: newsagentacr
+  # Routed through env rather than interpolated directly into a run: script
+  # (as inputs.sha would otherwise be below) -- a workflow_dispatch free-text
+  # input containing shell metacharacters must not become part of the
+  # generated script before bash parses it.
+  ROLLBACK_SHA: ${{ inputs.sha }}
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # moving_tag values here must match terraform/main.tf's 4
+      # application_stack blocks and deploy.yml's own copy of this case
+      # statement -- no single source of truth today, so a rename needs all
+      # three updated together.
+      - name: Resolve moving tag + target hosts for this environment
+        id: env
+        run: |
+          case "${{ inputs.environment }}" in
+            stage)
+              echo "moving_tag=stage-latest" >> "$GITHUB_OUTPUT"
+              echo "api_host=newsagent-api-stage.azurewebsites.net" >> "$GITHUB_OUTPUT"
+              echo "frontend_host=newsagent-frontend-stage.azurewebsites.net" >> "$GITHUB_OUTPUT"
+              ;;
+            prod)
+              echo "moving_tag=latest" >> "$GITHUB_OUTPUT"
+              echo "api_host=newsagent-api-prod.azurewebsites.net" >> "$GITHUB_OUTPUT"
+              echo "frontend_host=newsagent-frontend-prod.azurewebsites.net" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unknown environment: '${{ inputs.environment }}' (expected stage or prod)" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve target SHA for api
+        if: inputs.service == 'api' || inputs.service == 'both'
+        id: api_target
+        run: bash deploy/resolve-rollback-sha.sh newsagent-api "${{ steps.env.outputs.moving_tag }}" "$ROLLBACK_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Retag api
+        if: inputs.service == 'api' || inputs.service == 'both'
+        run: |
+          az acr import \
+            --name "$ACR_NAME" \
+            --source "$ACR_LOGIN_SERVER/newsagent-api:${{ steps.api_target.outputs.sha }}" \
+            --image "newsagent-api:${{ steps.env.outputs.moving_tag }}" \
+            --force
+
+      - name: Verify api rollback
+        if: inputs.service == 'api' || inputs.service == 'both'
+        run: bash deploy/verify-commit.sh "https://${{ steps.env.outputs.api_host }}/health" "${{ steps.api_target.outputs.sha }}"
+
+      - name: Resolve target SHA for frontend
+        if: inputs.service == 'frontend' || inputs.service == 'both'
+        id: frontend_target
+        run: bash deploy/resolve-rollback-sha.sh newsagent-frontend "${{ steps.env.outputs.moving_tag }}" "$ROLLBACK_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Retag frontend
+        if: inputs.service == 'frontend' || inputs.service == 'both'
+        run: |
+          az acr import \
+            --name "$ACR_NAME" \
+            --source "$ACR_LOGIN_SERVER/newsagent-frontend:${{ steps.frontend_target.outputs.sha }}" \
+            --image "newsagent-frontend:${{ steps.env.outputs.moving_tag }}" \
+            --force
+
+      - name: Verify frontend rollback
+        if: inputs.service == 'frontend' || inputs.service == 'both'
+        run: bash deploy/verify-commit.sh "https://${{ steps.env.outputs.frontend_host }}/version.json" "${{ steps.frontend_target.outputs.sha }}"

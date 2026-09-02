@@ -1,0 +1,149 @@
+# Builds news-agent's backend + frontend images from the triggering commit,
+# pushes both under an immutable <sha> tag and the environment's moving tag
+# (stage-latest / latest), then verifies the deploy actually landed. Deploy
+# itself is NOT a step here -- Azure's DOCKER_ENABLE_CI app setting
+# (Terraform-managed, terraform/main.tf) auto-creates an ACR webhook that
+# pulls + restarts each App Service when its moving tag is repushed. See
+# _bmad-output/specs/spec-gitops-deploy-trigger/ for the full design.
+#
+# Triggered by news-agent's minimal trigger Action (repository_dispatch,
+# deploy/for-naomi/trigger-deploy.yml) on every push to dev (stage) or main
+# (prod) -- fully automatic, no manual step in the steady-state path.
+# workflow_dispatch exists only for manual/bootstrap runs (e.g. populating
+# stage-latest/latest in ACR for the very first time, before that trigger
+# Action exists in news-agent, or before terraform apply has pointed the App
+# Services at a real image) -- see deploy/for-naomi/README.md.
+name: deploy
+
+on:
+  repository_dispatch:
+    types: [deploy]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options: [stage, prod]
+      sha:
+        description: "news-agent commit SHA to build"
+        required: true
+        type: string
+
+permissions:
+  id-token: write # required for OIDC federated login
+  contents: read
+
+# One deploy in flight per environment at a time -- two rapid pushes to the
+# same branch would otherwise race on the same moving tag, and the earlier
+# run's verify step could end up polling for a SHA the later run already
+# superseded.
+concurrency:
+  group: deploy-${{ github.event.client_payload.environment || inputs.environment }}
+  cancel-in-progress: false
+
+env:
+  ACR_LOGIN_SERVER: newsagentacr.azurecr.io
+  ENVIRONMENT: ${{ github.event.client_payload.environment || inputs.environment }}
+  SHA: ${{ github.event.client_payload.sha || inputs.sha }}
+  # Only Dockerfile.backend's throwaway build-proof stage needs this arg (its
+  # frontend build output is never copied into the shipped image) -- same
+  # value news-agent's own (now-removed) docker-build-push.yml used.
+  BACKEND_BUILD_PROOF_VITE_API_BASE: unused-discarded-build-stage
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout news-agent-infra (this repo, for the verify script)
+        uses: actions/checkout@v4
+
+      # Fails loudly here rather than downstream: a repository_dispatch
+      # fired directly against the GitHub API (bypassing
+      # trigger-deploy.yml's payload shape) could carry an empty/missing
+      # sha, which would otherwise surface only as an opaque "invalid
+      # reference format" from docker several steps later, or make the
+      # news-agent checkout below silently fall back to its default branch.
+      # moving_tag values here must match terraform/main.tf's 4
+      # application_stack blocks and rollback.yml's own copy of this case
+      # statement -- no single source of truth today, so a rename needs all
+      # three updated together.
+      - name: Resolve environment + validate inputs
+        id: env
+        run: |
+          if [ -z "$SHA" ]; then
+            echo "SHA is empty -- refusing to build (bad repository_dispatch payload?)" >&2
+            exit 1
+          fi
+          case "$ENVIRONMENT" in
+            stage)
+              echo "moving_tag=stage-latest" >> "$GITHUB_OUTPUT"
+              echo "api_host=newsagent-api-stage.azurewebsites.net" >> "$GITHUB_OUTPUT"
+              echo "frontend_host=newsagent-frontend-stage.azurewebsites.net" >> "$GITHUB_OUTPUT"
+              ;;
+            prod)
+              echo "moving_tag=latest" >> "$GITHUB_OUTPUT"
+              echo "api_host=newsagent-api-prod.azurewebsites.net" >> "$GITHUB_OUTPUT"
+              echo "frontend_host=newsagent-frontend-prod.azurewebsites.net" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unknown environment: '$ENVIRONMENT' (expected stage or prod)" >&2
+              exit 1
+              ;;
+          esac
+
+      # No token: override -- relies on the default GITHUB_TOKEN (scoped to
+      # this repo) being able to read news-agent, which only works because
+      # news-agent is public (confirmed via `gh api`, see pipeline-design.md's
+      # Credentials section). If news-agent is ever made private, this step
+      # needs a token with cross-repo read access.
+      - name: Checkout news-agent at the triggering commit
+        uses: actions/checkout@v4
+        with:
+          repository: MONS-Designers/news-agent
+          ref: ${{ env.SHA }}
+          path: news-agent-src
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ACR login
+        run: az acr login --name newsagentacr
+
+      # Backend and frontend are each pushed and verified before moving to
+      # the other -- if frontend's build fails, backend has already been
+      # confirmed serving the right commit rather than left pushed (and
+      # already pulled by DOCKER_ENABLE_CI) with no verification ever run
+      # against it in this job.
+      - name: Build and push backend
+        run: |
+          docker build \
+            -f news-agent-src/Dockerfile.backend \
+            --build-arg VITE_API_BASE="$BACKEND_BUILD_PROOF_VITE_API_BASE" \
+            --build-arg GIT_SHA="$SHA" \
+            -t "$ACR_LOGIN_SERVER/newsagent-api:$SHA" \
+            -t "$ACR_LOGIN_SERVER/newsagent-api:${{ steps.env.outputs.moving_tag }}" \
+            news-agent-src
+          docker push "$ACR_LOGIN_SERVER/newsagent-api:$SHA"
+          docker push "$ACR_LOGIN_SERVER/newsagent-api:${{ steps.env.outputs.moving_tag }}"
+
+      - name: Verify backend deploy (poll /health)
+        run: bash deploy/verify-commit.sh "https://${{ steps.env.outputs.api_host }}/health" "$SHA"
+
+      - name: Build and push frontend
+        run: |
+          docker build \
+            -f news-agent-src/Dockerfile.frontend \
+            --build-arg GIT_SHA="$SHA" \
+            -t "$ACR_LOGIN_SERVER/newsagent-frontend:$SHA" \
+            -t "$ACR_LOGIN_SERVER/newsagent-frontend:${{ steps.env.outputs.moving_tag }}" \
+            news-agent-src
+          docker push "$ACR_LOGIN_SERVER/newsagent-frontend:$SHA"
+          docker push "$ACR_LOGIN_SERVER/newsagent-frontend:${{ steps.env.outputs.moving_tag }}"
+
+      - name: Verify frontend deploy (poll /version.json)
+        run: bash deploy/verify-commit.sh "https://${{ steps.env.outputs.frontend_host }}/version.json" "$SHA"
