@@ -484,6 +484,37 @@ resource "azurerm_role_assignment" "frontend_prod_acr_pull" {
   principal_id         = azurerm_linux_web_app.frontend_prod.identity[0].principal_id
 }
 
+# Credential G: prod has no ACR webhook (Basic SKU caps webhooks at 2 registry-wide, both
+# already used by stage's api+frontend), so deploy.yml explicitly restarts each prod App
+# Service after pushing its moving tag, forcing a fresh image pull. Scoped to exactly
+# Microsoft.Web/sites/restart/action -- deliberately narrower than the "Website Contributor"
+# role eliminated earlier in this spec as "Credential E" (which could also change app config,
+# not just restart it). Same ci_acr_push identity as everything else in the pipeline; no new
+# credential type, just a narrower grant on it.
+resource "azurerm_role_definition" "webapp_restart" {
+  name        = "newsagent-webapp-restart"
+  scope       = azurerm_resource_group.prod.id
+  description = "Restart-only access for the deploy pipeline to force a fresh image pull on prod App Services."
+
+  permissions {
+    actions = ["Microsoft.Web/sites/restart/action"]
+  }
+
+  assignable_scopes = [azurerm_resource_group.prod.id]
+}
+
+resource "azurerm_role_assignment" "ci_prod_restart_api" {
+  scope              = azurerm_linux_web_app.api_prod.id
+  role_definition_id = azurerm_role_definition.webapp_restart.role_definition_resource_id
+  principal_id       = azurerm_user_assigned_identity.ci_acr_push.principal_id
+}
+
+resource "azurerm_role_assignment" "ci_prod_restart_frontend" {
+  scope              = azurerm_linux_web_app.frontend_prod.id
+  role_definition_id = azurerm_role_definition.webapp_restart.role_definition_resource_id
+  principal_id       = azurerm_user_assigned_identity.ci_acr_push.principal_id
+}
+
 output "shared_resource_group_name" {
   value = azurerm_resource_group.shared.name
 }

@@ -1,10 +1,19 @@
 # Builds news-agent's backend + frontend images from the triggering commit,
 # pushes both under an immutable <sha> tag and the environment's moving tag
-# (stage-latest / latest), then verifies the deploy actually landed. Deploy
-# itself is NOT a step here -- Azure's DOCKER_ENABLE_CI app setting
-# (Terraform-managed, terraform/main.tf) auto-creates an ACR webhook that
-# pulls + restarts each App Service when its moving tag is repushed. See
-# _bmad-output/specs/spec-gitops-deploy-trigger/ for the full design.
+# (stage-latest / latest), then verifies the deploy actually landed.
+#
+# Stage: Azure's DOCKER_ENABLE_CI app setting (Terraform-managed,
+# terraform/main.tf) auto-creates an ACR webhook that pulls + restarts each
+# App Service when its moving tag is repushed -- no explicit restart step
+# needed here.
+#
+# Prod: ACR Basic SKU caps webhooks at 2 registry-wide, both already used by
+# stage's api+frontend, so prod has no webhook. This workflow explicitly
+# restarts each prod App Service after pushing (`az webapp restart`), which
+# forces a fresh pull of the moving tag -- same effect as the webhook, via
+# the restart-only role in terraform/main.tf (Credential G).
+#
+# See _bmad-output/specs/spec-gitops-deploy-trigger/ for the full design.
 #
 # Triggered by news-agent's minimal trigger Action (repository_dispatch,
 # deploy/for-naomi/trigger-deploy.yml) on every push to dev (stage) or main
@@ -85,6 +94,7 @@ jobs:
               echo "moving_tag=latest" >> "$GITHUB_OUTPUT"
               echo "api_host=newsagent-api-prod.azurewebsites.net" >> "$GITHUB_OUTPUT"
               echo "frontend_host=newsagent-frontend-prod.azurewebsites.net" >> "$GITHUB_OUTPUT"
+              echo "resource_group=newsagent-prod-rg" >> "$GITHUB_OUTPUT"
               ;;
             *)
               echo "Unknown environment: '$ENVIRONMENT' (expected stage or prod)" >&2
@@ -131,6 +141,11 @@ jobs:
           docker push "$ACR_LOGIN_SERVER/newsagent-api:$SHA"
           docker push "$ACR_LOGIN_SERVER/newsagent-api:${{ steps.env.outputs.moving_tag }}"
 
+      # Stage doesn't need this -- its ACR webhook already pulls on push.
+      - name: Restart prod api (no ACR webhook there -- forces fresh pull)
+        if: env.ENVIRONMENT == 'prod'
+        run: az webapp restart --name newsagent-api-prod --resource-group ${{ steps.env.outputs.resource_group }}
+
       - name: Verify backend deploy (poll /health)
         run: bash deploy/verify-commit.sh "https://${{ steps.env.outputs.api_host }}/health" "$SHA"
 
@@ -144,6 +159,10 @@ jobs:
             news-agent-src
           docker push "$ACR_LOGIN_SERVER/newsagent-frontend:$SHA"
           docker push "$ACR_LOGIN_SERVER/newsagent-frontend:${{ steps.env.outputs.moving_tag }}"
+
+      - name: Restart prod frontend (no ACR webhook there -- forces fresh pull)
+        if: env.ENVIRONMENT == 'prod'
+        run: az webapp restart --name newsagent-frontend-prod --resource-group ${{ steps.env.outputs.resource_group }}
 
       - name: Verify frontend deploy (poll /version.json)
         run: bash deploy/verify-commit.sh "https://${{ steps.env.outputs.frontend_host }}/version.json" "$SHA"
