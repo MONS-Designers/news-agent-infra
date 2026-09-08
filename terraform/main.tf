@@ -87,11 +87,20 @@ resource "time_sleep" "wait_for_deployer_kv_rbac" {
 # Secret values default empty; set real ones via a gitignored
 # terraform.tfvars (or TF_VAR_*), or post-apply with `az keyvault secret set`
 # -- never hardcoded here.
+#
+# `ignore_changes = [value]` (2026-09-07, spec-secrets-sync): real values now
+# live in GitHub Secrets and are pushed here by .github/workflows/sync-secrets.yml
+# (`az keyvault secret set`), not by Terraform. `value = var.*` stays only so a
+# brand-new secret has *something* on first create -- Terraform never fights the
+# sync workflow's writes on a later `plan`/`apply`.
 resource "azurerm_key_vault_secret" "api_stage_database_url" {
   name         = "newsagent-api-stage-database-url"
   value        = var.database_url
   key_vault_id = azurerm_key_vault.shared.id
   depends_on   = [time_sleep.wait_for_deployer_kv_rbac]
+  lifecycle {
+    ignore_changes = [value]
+  }
 }
 
 resource "azurerm_key_vault_secret" "api_stage_smtp_password" {
@@ -99,6 +108,9 @@ resource "azurerm_key_vault_secret" "api_stage_smtp_password" {
   value        = var.smtp_password
   key_vault_id = azurerm_key_vault.shared.id
   depends_on   = [time_sleep.wait_for_deployer_kv_rbac]
+  lifecycle {
+    ignore_changes = [value]
+  }
 }
 
 resource "azurerm_key_vault_secret" "api_stage_google_client_secret" {
@@ -106,6 +118,9 @@ resource "azurerm_key_vault_secret" "api_stage_google_client_secret" {
   value        = var.google_client_secret
   key_vault_id = azurerm_key_vault.shared.id
   depends_on   = [time_sleep.wait_for_deployer_kv_rbac]
+  lifecycle {
+    ignore_changes = [value]
+  }
 }
 
 resource "azurerm_key_vault_secret" "api_stage_session_secret" {
@@ -113,6 +128,9 @@ resource "azurerm_key_vault_secret" "api_stage_session_secret" {
   value        = var.session_secret
   key_vault_id = azurerm_key_vault.shared.id
   depends_on   = [time_sleep.wait_for_deployer_kv_rbac]
+  lifecycle {
+    ignore_changes = [value]
+  }
 }
 
 # Prod's own secrets, same shared vault, `-prod-` naming per the convention
@@ -122,6 +140,9 @@ resource "azurerm_key_vault_secret" "api_prod_database_url" {
   value        = var.database_url_prod
   key_vault_id = azurerm_key_vault.shared.id
   depends_on   = [time_sleep.wait_for_deployer_kv_rbac]
+  lifecycle {
+    ignore_changes = [value]
+  }
 }
 
 resource "azurerm_key_vault_secret" "api_prod_smtp_password" {
@@ -129,6 +150,9 @@ resource "azurerm_key_vault_secret" "api_prod_smtp_password" {
   value        = var.smtp_password_prod
   key_vault_id = azurerm_key_vault.shared.id
   depends_on   = [time_sleep.wait_for_deployer_kv_rbac]
+  lifecycle {
+    ignore_changes = [value]
+  }
 }
 
 resource "azurerm_key_vault_secret" "api_prod_google_client_secret" {
@@ -136,6 +160,9 @@ resource "azurerm_key_vault_secret" "api_prod_google_client_secret" {
   value        = var.google_client_secret_prod
   key_vault_id = azurerm_key_vault.shared.id
   depends_on   = [time_sleep.wait_for_deployer_kv_rbac]
+  lifecycle {
+    ignore_changes = [value]
+  }
 }
 
 resource "azurerm_key_vault_secret" "api_prod_session_secret" {
@@ -143,6 +170,9 @@ resource "azurerm_key_vault_secret" "api_prod_session_secret" {
   value        = var.session_secret_prod
   key_vault_id = azurerm_key_vault.shared.id
   depends_on   = [time_sleep.wait_for_deployer_kv_rbac]
+  lifecycle {
+    ignore_changes = [value]
+  }
 }
 
 # Credential A: news-agent-infra's own deploy.yml/rollback.yml GitHub Actions
@@ -423,7 +453,13 @@ resource "azurerm_linux_web_app" "api_prod" {
     NEWSAGENT_SESSION_SECRET       = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault_secret.api_prod_session_secret.versionless_id})"
 
     NEWSAGENT_BACKEND_BASE_URL = "https://newsagent-api-prod.azurewebsites.net"
-    NEWSAGENT_FRONTEND_URL     = "https://${azurerm_linux_web_app.frontend_prod.default_hostname}"
+    # Custom domain (newsagent-ai.com), not the raw azurewebsites.net hostname --
+    # this drives the OAuth redirect_uri and CORS. Mismatching it against the
+    # custom domain users actually land on breaks Google login: the state/nonce
+    # session cookie is set on newsagent-ai.com, but Google would redirect back
+    # to a different host, so the browser never sends that cookie back and the
+    # callback handler crashes with no session to validate against.
+    NEWSAGENT_FRONTEND_URL = "https://newsagent-ai.com"
 
     NEWSAGENT_GOOGLE_CLIENT_ID  = var.google_client_id_prod
     NEWSAGENT_SMTP_USERNAME     = var.smtp_username_prod
@@ -484,6 +520,21 @@ resource "azurerm_role_assignment" "frontend_prod_acr_pull" {
   principal_id         = azurerm_linux_web_app.frontend_prod.identity[0].principal_id
 }
 
+# Bound manually via az CLI on 2026-09-04, imported here to bring it under
+# Terraform. DNS + TLS are Cloudflare-fronted: newsagent-ai.com resolves to
+# Cloudflare's edge (orange-cloud), which re-encrypts to this origin using a
+# Cloudflare Origin Certificate already uploaded to the App Service (not an
+# Azure Managed Certificate -- its private key isn't available to Terraform,
+# so the certificate itself stays unmanaged here; only the binding is
+# tracked, by its already-issued thumbprint).
+resource "azurerm_app_service_custom_hostname_binding" "frontend_prod_domain" {
+  hostname            = "newsagent-ai.com"
+  app_service_name    = azurerm_linux_web_app.frontend_prod.name
+  resource_group_name = azurerm_resource_group.prod.name
+  ssl_state           = "SniEnabled"
+  thumbprint          = "113F07B33CB2D307190046DA696D07A97758100C"
+}
+
 # Credential G: prod has no ACR webhook (Basic SKU caps webhooks at 2 registry-wide, both
 # already used by stage's api+frontend), so deploy.yml explicitly restarts each prod App
 # Service after pushing its moving tag, forcing a fresh image pull. Scoped to exactly
@@ -491,16 +542,23 @@ resource "azurerm_role_assignment" "frontend_prod_acr_pull" {
 # role eliminated earlier in this spec as "Credential E" (which could also change app config,
 # not just restart it). Same ci_acr_push identity as everything else in the pipeline; no new
 # credential type, just a narrower grant on it.
+#
+# Scope widened from prod-RG-only to subscription level (2026-09-07, spec-secrets-sync) so
+# the same restart-only role can also be assigned on api_stage below -- sync-secrets.yml needs
+# to restart stage's API after rotating its secrets, same as prod's deploy already does.
+# Deliberately still restart-only, not config-write: see sync-secrets.yml's own comment on why
+# a plain restart isn't always enough to pick up a rotated Key Vault value, and why that gap is
+# accepted rather than widening this role further.
 resource "azurerm_role_definition" "webapp_restart" {
   name        = "newsagent-webapp-restart"
-  scope       = azurerm_resource_group.prod.id
-  description = "Restart-only access for the deploy pipeline to force a fresh image pull on prod App Services."
+  scope       = "/subscriptions/${var.subscription_id}"
+  description = "Restart-only access for the deploy pipeline to force a fresh image pull on stage/prod App Services."
 
   permissions {
     actions = ["Microsoft.Web/sites/restart/action"]
   }
 
-  assignable_scopes = [azurerm_resource_group.prod.id]
+  assignable_scopes = [azurerm_resource_group.prod.id, azurerm_resource_group.stage.id]
 }
 
 resource "azurerm_role_assignment" "ci_prod_restart_api" {
@@ -511,6 +569,12 @@ resource "azurerm_role_assignment" "ci_prod_restart_api" {
 
 resource "azurerm_role_assignment" "ci_prod_restart_frontend" {
   scope              = azurerm_linux_web_app.frontend_prod.id
+  role_definition_id = azurerm_role_definition.webapp_restart.role_definition_resource_id
+  principal_id       = azurerm_user_assigned_identity.ci_acr_push.principal_id
+}
+
+resource "azurerm_role_assignment" "ci_stage_restart_api" {
+  scope              = azurerm_linux_web_app.api_stage.id
   role_definition_id = azurerm_role_definition.webapp_restart.role_definition_resource_id
   principal_id       = azurerm_user_assigned_identity.ci_acr_push.principal_id
 }
