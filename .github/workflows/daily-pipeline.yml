@@ -1,0 +1,79 @@
+# Runs news-agent's daily collection stages (fetch -> filter -> extract -> summarize)
+# against one environment's database, with that environment's real LLM settings.
+#
+# Runs from a fresh news-agent checkout on a GitHub runner, not from the deployed
+# image: no Azure login and no new Azure resource. The DB URL and LLM token come
+# from the GitHub Environment of the same name. stage runs news-agent's dev
+# branch and prod runs main, the same mapping as deploy.yml.
+#
+# Manual only for now. Add a `schedule:` trigger for prod once a stage run has
+# been read end to end. The delivery loop (build + send) is separate and is not
+# started here.
+name: daily-pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options: [stage, prod]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-pipeline-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # Selects which GitHub Environment's secrets and variables resolve below,
+    # and triggers that environment's required-reviewer gate (stage has one).
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Checkout news-agent
+        uses: actions/checkout@v4
+        with:
+          repository: MONS-Designers/news-agent
+          ref: ${{ inputs.environment == 'prod' && 'main' || 'dev' }}
+          path: news-agent-src
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: news-agent-src/requirements.txt
+
+      - name: Install
+        run: |
+          pip install -r news-agent-src/requirements.txt
+          pip install ./news-agent-src
+
+      # The CLI exits 0 on most failures, so a green run alone proves nothing.
+      # usage-report goes last: it shows whether the LLM was actually called.
+      - name: Run daily stages
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          NEWSAGENT_DATABASE_URL: ${{ secrets.NEWSAGENT_DATABASE_URL }}
+          NEWSAGENT_LLM_PROVIDER: external
+          EXTERNAL_LLM_BASE_URL: ${{ vars.EXTERNAL_LLM_BASE_URL }}
+          EXTERNAL_LLM_MODEL: ${{ vars.EXTERNAL_LLM_MODEL }}
+          EXTERNAL_LLM_AUTH_TOKEN: ${{ secrets.EXTERNAL_LLM_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          for v in NEWSAGENT_DATABASE_URL EXTERNAL_LLM_BASE_URL EXTERNAL_LLM_MODEL EXTERNAL_LLM_AUTH_TOKEN; do
+            [ -n "${!v}" ] || { echo "$v is empty in the $ENVIRONMENT environment" >&2; exit 1; }
+          done
+          case "$EXTERNAL_LLM_BASE_URL" in
+            https://*) ;;
+            *) echo "EXTERNAL_LLM_BASE_URL must start with https:// (placeholder left in?)" >&2; exit 1 ;;
+          esac
+          for stage in fetch filter extract summarize usage-report; do
+            echo "::group::$stage"
+            python -m newsagent.cli "$stage"
+            echo "::endgroup::"
+          done
