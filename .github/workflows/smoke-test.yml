@@ -1,12 +1,10 @@
 name: Smoke test (live deploy)
 
 # Checks the live production deployment, not code in this repo — deliberately
-# separate from a normal push/PR-triggered CI job. Runs on a schedule so a
-# regression on the deployed site (not just in a diff) gets caught, and can
-# be triggered manually right after a deploy.
+# separate from a normal push/PR-triggered CI job. Manual only: run it by hand
+# after a deploy. It has no schedule -- an empty cron string made GitHub reject
+# the whole file, so every push to main showed a red run.
 on:
-  schedule:
-    - cron: ""
   workflow_dispatch:
 
 jobs:

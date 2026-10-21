@@ -20,6 +20,11 @@ import urllib.request
 from urllib.request import HTTPRedirectHandler
 
 
+# Cloudflare (in front of the custom domain) answers 403 to Python's default
+# User-Agent, so every request carries a browser-style one.
+USER_AGENT = "Mozilla/5.0 (compatible; newsagent-smoke-test)"
+
+
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         return None
@@ -29,10 +34,14 @@ def _opener():
     return urllib.request.build_opener(NoRedirect)
 
 
+def _request(url: str) -> urllib.request.Request:
+    return urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+
+
 def check_200(name: str, url: str) -> list[str]:
     """Fails unless the URL returns exactly 200."""
     try:
-        with urllib.request.urlopen(url, timeout=10) as resp:
+        with urllib.request.urlopen(_request(url), timeout=10) as resp:
             if resp.status != 200:
                 return [f"{name}: expected 200, got {resp.status} ({url})"]
             return []
@@ -46,7 +55,7 @@ def check_redirects_to_google(name: str, url: str) -> list[str]:
     with the wrong content instead of erroring, so a plain 200 check
     would have passed right through it."""
     try:
-        with _opener().open(url, timeout=10) as resp:
+        with _opener().open(_request(url), timeout=10) as resp:
             return [
                 f"{name}: expected a redirect (3xx), got {resp.status} "
                 f"with no Location header — likely hitting a static-file "
@@ -68,8 +77,8 @@ def check_redirects_to_google(name: str, url: str) -> list[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--app-url", default="https://app.newsagent-ai.com")
-    parser.add_argument("--api-url", default="https://api.newsagent-ai.com")
+    parser.add_argument("--app-url", default="https://newsagent-ai.com")
+    parser.add_argument("--api-url", default="https://newsagent-api-prod.azurewebsites.net")
     args = parser.parse_args()
 
     failures: list[str] = []
