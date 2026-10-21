@@ -119,6 +119,18 @@ variable "smtp_username" {
   default     = ""
 }
 
+# Required (no default): an empty value would silently break the external LLM
+# provider, so plan should fail instead.
+variable "external_llm_base_url" {
+  description = "EXTERNAL_LLM_BASE_URL app setting on the stage and prod API apps -- an OpenAI-compatible chat-completions base URL"
+  type        = string
+}
+
+variable "external_llm_model" {
+  description = "EXTERNAL_LLM_MODEL app setting on the stage and prod API apps"
+  type        = string
+}
+
 # --- Prod: same 6 values, own variables (prod will hold different real
 # values than stage, even though the shape is an exact copy) ---
 

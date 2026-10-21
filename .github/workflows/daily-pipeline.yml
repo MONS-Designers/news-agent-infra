@@ -6,12 +6,15 @@
 # from the GitHub Environment of the same name. stage runs news-agent's dev
 # branch and prod runs main, the same mapping as deploy.yml.
 #
-# Manual only for now. Add a `schedule:` trigger for prod once a stage run has
-# been read end to end. The delivery loop (build + send) is separate and is not
-# started here.
+# The schedule targets prod only (a scheduled run has no inputs, hence the
+# `|| 'prod'` fallbacks below); stage is manual. The delivery loop (build +
+# send) is separate and is not started here. GitHub may start scheduled runs
+# 15-60 minutes late, and disables them after 60 days without repo activity.
 name: daily-pipeline
 
 on:
+  schedule:
+    - cron: "0 3 * * *"
   workflow_dispatch:
     inputs:
       environment:
@@ -24,7 +27,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: daily-pipeline-${{ inputs.environment }}
+  group: daily-pipeline-${{ inputs.environment || 'prod' }}
   cancel-in-progress: false
 
 jobs:
@@ -33,13 +36,13 @@ jobs:
     timeout-minutes: 90
     # Selects which GitHub Environment's secrets and variables resolve below,
     # and triggers that environment's required-reviewer gate (stage has one).
-    environment: ${{ inputs.environment }}
+    environment: ${{ inputs.environment || 'prod' }}
     steps:
       - name: Checkout news-agent
         uses: actions/checkout@v4
         with:
           repository: MONS-Designers/news-agent
-          ref: ${{ inputs.environment == 'prod' && 'main' || 'dev' }}
+          ref: ${{ (inputs.environment || 'prod') == 'prod' && 'main' || 'dev' }}
           path: news-agent-src
 
       - uses: actions/setup-python@v5
@@ -57,7 +60,7 @@ jobs:
       # usage-report goes last: it shows whether the LLM was actually called.
       - name: Run daily stages
         env:
-          ENVIRONMENT: ${{ inputs.environment }}
+          ENVIRONMENT: ${{ inputs.environment || 'prod' }}
           NEWSAGENT_DATABASE_URL: ${{ secrets.NEWSAGENT_DATABASE_URL }}
           NEWSAGENT_LLM_PROVIDER: external
           EXTERNAL_LLM_BASE_URL: ${{ vars.EXTERNAL_LLM_BASE_URL }}
