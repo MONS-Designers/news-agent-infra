@@ -14,7 +14,9 @@ name: daily-pipeline
 
 on:
   schedule:
-    - cron: "0 3 * * *"
+    # Sunday-Friday, never Saturday (Shabbat). 03:00 UTC is 05:00-06:00 in
+    # Israel on the same calendar day all year, so the weekday maps exactly.
+    - cron: "0 3 * * 0-5"
   workflow_dispatch:
     inputs:
       environment:
