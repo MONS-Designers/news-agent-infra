@@ -19,6 +19,36 @@ sources:
     category: tech
     language: en
 
+  - name: "GitHub Blog"
+    url: "https://github.blog/feed/"
+    category: tech
+    language: en
+
+  - name: "InfoQ Software Architecture"
+    url: "https://feed.infoq.com/architecture-design/"
+    category: tech
+    language: en
+
+  - name: "Martin Fowler"
+    url: "https://martinfowler.com/feed.atom"
+    category: tech
+    language: en
+
+  - name: "Changelog News"
+    url: "https://changelog.com/news/feed"
+    category: tech
+    language: en
+
+  - name: "Lobsters"
+    url: "https://lobste.rs/rss"
+    category: tech
+    language: en
+
+  - name: "Simon Willison"
+    url: "https://simonwillison.net/atom/everything/"
+    category: tech
+    language: en
+
   - name: "BBC News - World"
     url: "https://feeds.bbci.co.uk/news/world/rss.xml"
     category: world_news
