@@ -32,14 +32,6 @@ provider "azurerm" {
 
 data "azurerm_client_config" "current" {}
 
-locals {
-  api_boot = join(";", [
-    "import os,subprocess",
-    "subprocess.Popen([\"sh\",\"-c\",\"while true; do python -m newsagent.scheduler; sleep 10; done\"])",
-    "os.execvp(\"uvicorn\",[\"uvicorn\",\"newsagent.api.main:app\",\"--host\",\"0.0.0.0\",\"--port\",\"8000\"])",
-  ])
-}
-
 # --- Shared resources: reused by stage AND (later) prod ---
 
 resource "azurerm_resource_group" "shared" {
@@ -290,15 +282,6 @@ resource "azurerm_linux_web_app" "api_stage" {
     # AcrPull role assignment below.
     container_registry_use_managed_identity = true
 
-    # Starts Naomi's delivery loop beside the API. App Service needs an HTTP
-    # listener and the loop has none, so uvicorn stays the main process (exec)
-    # and a shell child restarts the loop whenever it exits. App Service splits
-    # this line on whitespace and passes quotes through literally (single and
-    # double quotes both made `sh -c` fail with "Unterminated quoted string",
-    # 2026-10-21), so the command is one space-free token and the real script
-    # lives in the API_BOOT app setting.
-    app_command_line = "python -c exec(__import__(\"os\").environ[\"API_BOOT\"])"
-
     application_stack {
       docker_image_name   = "newsagent-api:stage-latest"
       docker_registry_url = "https://${azurerm_container_registry.shared.login_server}"
@@ -350,11 +333,9 @@ resource "azurerm_linux_web_app" "api_stage" {
     NEWSAGENT_SMTP_PORT         = "587"
     NEWSAGENT_SMTP_FROM_ADDRESS = "newsagent.ai.01@gmail.com"
 
-    # Real delivery. Check who is in stage's users table before applying: the
-    # delivery loop sends a first email to everyone not yet welcomed.
+    # The API sends a first email after a reader completes preferences. The
+    # daily pipeline invokes cadence-gated delivery after processing.
     NEWSAGENT_EMAIL_SENDER = "smtp"
-
-    API_BOOT = local.api_boot
 
     NEWSAGENT_LLM_PROVIDER = "external"
     EXTERNAL_LLM_BASE_URL  = var.external_llm_base_url
@@ -460,10 +441,6 @@ resource "azurerm_linux_web_app" "api_prod" {
     # reasoning.
     container_registry_use_managed_identity = true
 
-    # Delivery loop beside the API -- same single-token trick and reasoning as
-    # api_stage (the script lives in the API_BOOT app setting).
-    app_command_line = "python -c exec(__import__(\"os\").environ[\"API_BOOT\"])"
-
     application_stack {
       docker_image_name   = "newsagent-api:latest"
       docker_registry_url = "https://${azurerm_container_registry.shared.login_server}"
@@ -498,12 +475,9 @@ resource "azurerm_linux_web_app" "api_prod" {
     NEWSAGENT_SMTP_PORT         = "587"
     NEWSAGENT_SMTP_FROM_ADDRESS = "newsagent.ai.01@gmail.com"
 
-    # Go-live. The delivery loop sends a first email to every user not yet
-    # welcomed, so check prod's users table before applying. Never run the loop
-    # with "console": it marks digests sent without emailing anyone.
+    # The API sends a first email after a reader completes preferences. The
+    # daily pipeline invokes cadence-gated delivery after processing.
     NEWSAGENT_EMAIL_SENDER = "smtp"
-
-    API_BOOT = local.api_boot
 
     NEWSAGENT_LLM_PROVIDER = "external"
     EXTERNAL_LLM_BASE_URL  = var.external_llm_base_url
