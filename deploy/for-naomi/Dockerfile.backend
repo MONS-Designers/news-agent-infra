@@ -75,13 +75,11 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 CMD ["uvicorn", "newsagent.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
-# This image also carries the delivery scheduler, which owns the send schedule
-# in code rather than in an external cron. Run it as a SECOND container from
-# this same image, overriding the command:
+# Digest delivery is a one-shot pass, invoked by the daily-pipeline workflow
+# after collection and summarization. Do not run it as a second long-lived
+# container; the API triggers a new reader's first email after preferences are
+# saved, and the workflow retries any pending first emails on its next run:
 #
 #     python -m newsagent.scheduler
 #
-# It needs the database URL and the mail settings (NEWSAGENT_EMAIL_SENDER and
-# the SMTP_* values); the API container does not. Extra replicas are safe --
-# a lease row lets only one deliver at a time -- but they do no useful work,
-# so one is enough.
+# The command needs database, SMTP, LLM, and public backend URL settings.
